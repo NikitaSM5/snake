@@ -1,139 +1,168 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
-use work.state.all; 
+use work.state.all;
 
 entity top_level_snake is
 	port (
 		CLOCK_50 : in std_logic;
-		VGA_CLK   : out  std_logic;
-		VGA_HS       : out std_logic;
-		VGA_VS       : out std_logic;
-		VGA_R           : out std_logic_vector(7 downto 0);  
-		VGA_G           : out std_logic_vector(7 downto 0);  
-		VGA_B           : out std_logic_vector(7 downto 0) ;
-		KEY : in std_logic_vector(3 downto 0);  
+		VGA_CLK : out std_logic;
+		VGA_HS : out std_logic;
+		VGA_VS : out std_logic;
+		VGA_R : out std_logic_vector(7 downto 0);
+		VGA_G : out std_logic_vector(7 downto 0);
+		VGA_B : out std_logic_vector(7 downto 0);
+		KEY : in std_logic_vector(3 downto 0);
 		VGA_BLANK : out std_logic := '1';
 		VGA_SYNC : out std_logic := '0';
-		SW : in std_logic_vector (0 downto 0);
-
-		HEX0 : out std_logic_vector (7 downto 0);
-		HEX1 : out std_logic_vector (7 downto 0);
-		HEX2 : out std_logic_vector (7 downto 0);
-		HEX3 : out std_logic_vector (7 downto 0);
-		HEX4 : out std_logic_vector (7 downto 0);
-		HEX5 : out std_logic_vector (7 downto 0);
-		HEX6 : out std_logic_vector (7 downto 0);
-		HEX7 : out std_logic_vector (7 downto 0)
-
-		);
+		SW : in std_logic_vector (8 downto 0);
+		HEX0 : out std_logic_vector(6 downto 0);
+		HEX1 : out std_logic_vector(6 downto 0);
+		HEX2 : out std_logic_vector(6 downto 0);
+		HEX3 : out std_logic_vector(6 downto 0);
+		HEX4 : out std_logic_vector(6 downto 0);
+		HEX5 : out std_logic_vector(6 downto 0);
+		HEX6 : out std_logic_vector(6 downto 0);
+		HEX7 : out std_logic_vector(6 downto 0)
+	);
 end top_level_snake;
 
 architecture rtl of top_level_snake is
-	
-	constant VGA_DIVISOR : integer := 1;        
-	constant GAME_DIVISOR : integer := 12500000; 
-	signal clk_div : std_logic := '0';
-	signal count : integer := 0;
-	signal game_clk_div : std_logic := '0';
+
+	signal GAME_DIVISOR : integer := 12500000;
+	signal game_clk_en : std_logic := '0';
+	signal score : integer := 0;
+	signal level : integer := 1;
+	signal clk_25mhz : std_logic;
 	signal current_direction : direction;
-	signal game_clk_en : std_logic;
-	signal vga_clk_en : std_logic;
-	signal score : integer;
-	signal game_count : integer := 0;
 
 	component snake_game is
 		port (
-			CLOCK_50   : in  std_logic;
+			clk_25mhz : in std_logic;
+			hsync : out std_logic;
+			vsync : out std_logic;
+			r : out std_logic_vector (7 downto 0);
+			g : out std_logic_vector (7 downto 0);
+			b : out std_logic_vector (7 downto 0);
+			current_direction_t : in direction;
 			game_clk_en : in std_logic;
-			vga_clk_en : in std_logic;
-			hsync       : out std_logic;
-			vsync       : out std_logic;
-			r           : out std_logic_vector(7 downto 0);  
-			g           : out std_logic_vector(7 downto 0);  
-			b           : out std_logic_vector(7 downto 0);  
-			current_direction : in direction;
-			tail_length : out integer;
-			reset_snake       : in  std_logic
-			);
-	end component; 
-	
+			reset_snake : in std_logic;
+			score : out integer
+		);
+	end component;
+
+	component game_divisor_module is
+		port (
+			clk_25mhz : in std_logic;
+			switch : in std_logic_vector (8 downto 0);
+			GAME_DIVISOR : out integer;
+			level : out integer
+		);
+	end component;
+
+	component clock_25 is
+		port (
+			inclk0 : in std_logic := '0';
+			c0 : out std_logic
+		);
+	end component;
+
+	component game_clk_counter is
+		port (
+			GAME_DIVISOR : in integer;
+			clk_25mhz : in std_logic;
+			game_clk_en : out std_logic
+		);
+	end component;
+
+	component hex_handler is
+		port (
+			clk_25mhz : in std_logic;
+			game_clk_en : in std_logic;
+			level : in integer;
+			score : in integer;
+			rst : in std_logic;
+			hex_0 : out std_logic_vector(6 downto 0);
+			hex_1 : out std_logic_vector(6 downto 0);
+			hex_2 : out std_logic_vector(6 downto 0);
+			hex_3 : out std_logic_vector(6 downto 0);
+			hex_4 : out std_logic_vector(6 downto 0);
+			hex_5 : out std_logic_vector(6 downto 0);
+			hex_6 : out std_logic_vector(6 downto 0);
+			hex_7 : out std_logic_vector(6 downto 0)
+		);
+	end component;
+
+	component key_handler is
+		port (
+			clk_25mhz : in std_logic;
+			reset : in std_logic;
+			key_in : in std_logic_vector(3 downto 0);
+			current_direction : out direction
+		);
+	end component;
+
 begin
-	
-	snake_game_instance: snake_game
-	 port map(
-		CLOCK_50 => CLOCK_50,
-		game_clk_en => game_clk_en,
-		vga_clk_en => vga_clk_en,
+
+	clock_25_inst : clock_25
+	port map(
+		inclk0 => CLOCK_50,
+		c0 => clk_25mhz
+	);
+
+	game_clk_counter_inst : game_clk_counter
+	port map(
+		GAME_DIVISOR => GAME_DIVISOR,
+		clk_25mhz => clk_25mhz,
+		game_clk_en => game_clk_en
+	);
+
+	snake_game_inst : snake_game port map(
+		clk_25mhz => clk_25mhz,
 		hsync => VGA_HS,
 		vsync => VGA_VS,
 		r => VGA_R,
 		g => VGA_G,
 		b => VGA_B,
-		current_direction => current_direction,
-		tail_length => score,
-		reset_snake => SW(0)
+		current_direction_t => current_direction,
+		game_clk_en => game_clk_en,
+		reset_snake => SW(0),
+		score => score
 	);
-	
-	process (CLOCK_50)
-    begin
-        if rising_edge(CLOCK_50) then
-            vga_clk_en <= not vga_clk_en;
-        end if;
-    end process;
 
-	process (CLOCK_50)
-    begin
-        if rising_edge(CLOCK_50) then
-            if vga_clk_en = '1'  then
-				VGA_CLK <= '1';
-			else
-				VGA_CLK <= '0';
-			end if;
-        end if;
-    end process;
-	
-	process (CLOCK_50)
-	begin
-		if rising_edge(CLOCK_50) then
-			if game_count = GAME_DIVISOR then
-				game_count <= 0;
-				game_clk_en <= not game_clk_en;  
-			else
-				game_count <= game_count + 1;
-			end if;
-		end if;
-	end process;
-	
-	process (CLOCK_50)
-	begin
-	if rising_edge(CLOCK_50) and vga_clk_en = '1' then		
-		if rising_edge(clk_div) then
-			if (KEY = not "0001" and current_direction /= DOWN ) then
-			current_direction <= UP;
-			end if;
-			if (KEY = not "0010" and current_direction /= UP ) then
-			current_direction <= DOWN;
-			end if;
-			if (KEY = not "0100" and current_direction /= LEFT ) then
-			current_direction <= RIGHT;
-			end if;
-			if (KEY = not "1000" and current_direction /= RIGHT ) then
-			current_direction <= LEFT;
-			end if;
-			if (KEY = "0000") then
-			current_direction <= current_direction;
-			end if;
-		end if;
-	end if;	
-	end process;
+	key_handler_inst : key_handler
+	port map(
+		clk_25mhz => clk_25mhz,
+		reset => SW(0),
+		key_in => KEY,
+		current_direction => current_direction
+	);
 
-	HEX0 <= SEGMENT_MAP(score mod 10);
-	HEX1 <= SEGMENT_MAP((score mod 100)/10);
-	HEX2 <= SEGMENT_MAP((score mod 1000)/100);
-	HEX3 <= SEGMENT_MAP(14);
-	HEX4 <= SEGMENT_MAP(10);
-	HEX5 <= SEGMENT_MAP(0);
-	HEX6 <= SEGMENT_MAP(12);
-	HEX7 <= SEGMENT_MAP(5);
-end;	
+	VGA_CLK <= clk_25mhz;
+
+	game_divisor_module_inst : game_divisor_module
+	port map(
+		clk_25mhz => clk_25mhz,
+		switch => SW,
+		GAME_DIVISOR => GAME_DIVISOR,
+		level => level
+	);
+
+	hex_handler_inst : hex_handler
+	port map(
+		clk_25mhz => clk_25mhz,
+		game_clk_en => game_clk_en,
+		level => level,
+		score => score,
+		rst => SW(0),
+		hex_0 => HEX0,
+		hex_1 => HEX1,
+		hex_2 => HEX2,
+		hex_3 => HEX3,
+		hex_4 => HEX4,
+		hex_5 => HEX5,
+		hex_6 => HEX6,
+		hex_7 => HEX7
+	);
+
+end;
